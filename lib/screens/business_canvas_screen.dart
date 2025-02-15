@@ -1,26 +1,119 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../widgets/canvas_item.dart';
+import '../services/db_service.dart';
+import '../models/canvas_item_model.dart';
+import '../widgets/edit_canvas_item_dialog.dart';
+import 'package:path/path.dart';
+import 'dart:convert';
+import 'dart:io' as io;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:file_picker/file_picker.dart';
+import 'package:file_saver/file_saver.dart';
+import 'dart:typed_data' show Uint8List;
 
 class BusinessCanvasScreen extends StatefulWidget {
-  const BusinessCanvasScreen({super.key});
+  const BusinessCanvasScreen({Key? key}) : super(key: key);
 
   @override
   _BusinessCanvasScreenState createState() => _BusinessCanvasScreenState();
 }
 
-class _BusinessCanvasScreenState extends State<BusinessCanvasScreen> {
-  List<String> items = [
-    'Value Proposition',
-    'Customer Segment',
-    'Revenue Stream',
-    'Cost Structure',
-    'Key Activities',
-    'Key Resources',
-    'Key Partners',
-    'Channels',
-    'Customer Relationships',
-  ];
+class _BusinessCanvasScreenState extends State<BusinessCanvasScreen>
+    with TickerProviderStateMixin {
+  List<CanvasItemModel> items = [];
+  final DbService dbService = DbService();
+  final TransformationController _transformationController =
+      TransformationController();
+  double _scale = 1.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCanvasItems();
+  }
+
+  Future<void> _loadCanvasItems() async {
+    final loadedItems = await dbService.getCanvasItems();
+    setState(() {
+      items = loadedItems;
+    });
+  }
+
+  Future<void> _saveCanvasItem(CanvasItemModel item) async {
+    await dbService.insertCanvasItem(item);
+  }
+
+  Future<void> _deleteCanvasItem(int id) async {
+    await dbService.deleteCanvasItem(id);
+    setState(() {
+      items.removeWhere((item) => item.id == id);
+    });
+  }
+
+  Future<void> _saveCanvasItemsToDb(BuildContext context) async {
+    String canvasData = jsonEncode(items.map((item) => item.toMap()).toList());
+
+    if (kIsWeb) {
+      try {
+        await FileSaver.instance.saveFile(
+          name: "business_canvas.json",
+          bytes: Uint8List.fromList(utf8.encode(canvasData)),
+          ext: 'json',
+          mimeType: MimeType.json,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Canvas data downloaded!')),
+        );
+      } catch (e) {
+        print('Error downloading file on web: $e');
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Error saving file')));
+      }
+    } else {
+      String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Please select a location to save the canvas data:',
+        fileName: 'business_canvas.json',
+      );
+
+      if (outputFile != null) {
+        await io.File(outputFile).writeAsString(canvasData);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Canvas saved to file!')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Save operation cancelled.')),
+        );
+      }
+    }
+  }
+
+  void _addCanvasItem(String type) {
+    final newItem = CanvasItemModel(
+      id: DateTime.now().millisecondsSinceEpoch,
+      type: type,
+      content: 'Define your $type here...',
+      x: 0.0,
+      y: 0.0,
+      width: 200.0,
+      height: 150.0,
+    );
+
+    setState(() {
+      items.add(newItem);
+    });
+    _saveCanvasItem(newItem);
+  }
+
+  void _updateCanvasItem(CanvasItemModel updatedItem) {
+    final index = items.indexWhere((item) => item.id == updatedItem.id);
+    if (index != -1) {
+      setState(() {
+        items[index] = updatedItem;
+      });
+    }
+  }
 
   Widget _buildGridBackground() {
     return CustomPaint(painter: GridPainter(), child: Container());
@@ -30,12 +123,43 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Business Canvas'),
+        title: const Text('Business Model Canvas'),
         actions: [
           IconButton(
             icon: const Icon(Icons.save),
-            onPressed: () {
-              // Save to db_service
+            onPressed: () => _saveCanvasItemsToDb(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.clear),
+            onPressed: () async {
+              bool? confirmClear = await showDialog<bool>(
+                context: context,
+                builder: (BuildContext context) {
+                  return AlertDialog(
+                    title: const Text('Clear Canvas'),
+                    content: const Text(
+                      'Are you sure you want to clear the entire canvas? This action cannot be undone.',
+                    ),
+                    actions: <Widget>[
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('Clear'),
+                      ),
+                    ],
+                  );
+                },
+              );
+
+              if (confirmClear == true) {
+                await dbService.clearCanvasItems();
+                setState(() {
+                  items.clear();
+                });
+              }
             },
           ),
         ],
@@ -43,47 +167,183 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen> {
       body: Stack(
         children: [
           _buildGridBackground(),
-          MasonryGridView.count(
-            crossAxisCount: 2,
-            mainAxisSpacing: 4,
-            crossAxisSpacing: 4,
-            padding: const EdgeInsets.all(8),
-            itemCount: items.length,
-            itemBuilder: (context, index) {
-              return DragTarget<String>(
-                onAccept: (data) {
-                  setState(() {
-                    final fromIndex = items.indexOf(data);
-                    final item = items.removeAt(fromIndex);
-                    items.insert(index, item);
-                  });
-                },
-                builder: (context, candidates, rejects) {
-                  return Draggable<String>(
-                    data: items[index],
-                    feedback: Material(
-                      elevation: 4,
-                      child: CanvasItem(title: items[index]),
-                    ),
-                    childWhenDragging: Container(
-                      height: 100,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey),
-                        borderRadius: BorderRadius.circular(8),
+          InteractiveViewer(
+            transformationController: _transformationController,
+            minScale: 0.5,
+            maxScale: 2.0,
+            child: Stack(
+              children:
+                  items.map((item) {
+                    return AnimatedPositioned(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      left: item.x,
+                      top: item.y,
+                      child: Draggable<CanvasItemModel>(
+                        data: item,
+                        feedback: Material(child: CanvasItem(item: item)),
+                        childWhenDragging: Container(
+                          width: item.width,
+                          height: item.height,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onDragEnd: (details) {
+                          setState(() {
+                            item.x = details.offset.dx;
+                            item.y = details.offset.dy;
+                            _updateCanvasItem(item);
+                            _saveCanvasItem(item); // Save after drag
+                          });
+                        },
+                        child: InkWell(
+                          onTap: () async {
+                            final updatedItem =
+                                await showDialog<CanvasItemModel>(
+                                  context: context,
+                                  builder: (BuildContext context) {
+                                    return EditCanvasItemDialog(item: item);
+                                  },
+                                );
+                            if (updatedItem != null) {
+                              setState(() {
+                                item.content = updatedItem.content;
+                              });
+                              _updateCanvasItem(item);
+                              _saveCanvasItem(item); // Save after edit
+                            }
+                          },
+                          onLongPress: () {
+                            showDialog(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return AlertDialog(
+                                  title: const Text('Delete Canvas Item'),
+                                  content: const Text(
+                                    'Are you sure you want to delete this item?',
+                                  ),
+                                  actions: <Widget>[
+                                    TextButton(
+                                      onPressed:
+                                          () => Navigator.of(context).pop(),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () {
+                                        _deleteCanvasItem(item.id);
+                                        Navigator.of(context).pop();
+                                      },
+                                      child: const Text('Delete'),
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+                          },
+                          child: CanvasItem(item: item),
+                        ),
                       ),
-                    ),
-                    child: CanvasItem(title: items[index]),
-                  );
-                },
-              );
-            },
+                    );
+                  }).toList(),
+            ),
+          ),
+          Positioned(
+            bottom: 80,
+            right: 16,
+            child: Column(
+              children: [
+                FloatingActionButton(
+                  mini: true,
+                  child: const Icon(Icons.zoom_in),
+                  onPressed: () {
+                    setState(() {
+                      _scale += 0.1;
+                      _transformationController.value = Matrix4.diagonal3Values(
+                        _scale,
+                        _scale,
+                        1.0,
+                      ); // Update the matrix
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  mini: true,
+                  child: const Icon(Icons.zoom_out),
+                  onPressed: () {
+                    setState(() {
+                      _scale -= 0.1;
+                      if (_scale < 0.5) _scale = 0.5;
+                      _transformationController.value = Matrix4.diagonal3Values(
+                        _scale,
+                        _scale,
+                        1.0,
+                      ); // Update the matrix
+                    });
+                  },
+                ),
+              ],
+            ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.add),
-        onPressed: () {
-          // Show dialog to add new canvas item
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.lightbulb_outline),
+            label: 'Value Prop',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people_outline),
+            label: 'Customer Seg',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.attach_money),
+            label: 'Revenue',
+          ),
+          BottomNavigationBarItem(icon: Icon(Icons.money_off), label: 'Cost'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Key Act'),
+          BottomNavigationBarItem(icon: Icon(Icons.build), label: 'Key Res'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.handshake),
+            label: 'Key Part',
+          ),
+          BottomNavigationBarItem(icon: Icon(Icons.send), label: 'Channels'),
+          BottomNavigationBarItem(icon: Icon(Icons.group), label: 'Cust Rel'),
+        ],
+        onTap: (index) {
+          switch (index) {
+            case 0:
+              _addCanvasItem('Value Proposition');
+              break;
+            case 1:
+              _addCanvasItem('Customer Segment');
+              break;
+            case 2:
+              _addCanvasItem('Revenue Stream');
+              break;
+            case 3:
+              _addCanvasItem('Cost Structure');
+              break;
+            case 4:
+              _addCanvasItem('Key Activities');
+              break;
+            case 5:
+              _addCanvasItem('Key Resources');
+              break;
+            case 6:
+              _addCanvasItem('Key Partners');
+              break;
+            case 7:
+              _addCanvasItem('Channels');
+              break;
+            case 8:
+              _addCanvasItem('Customer Relationships');
+              break;
+          }
         },
       ),
     );

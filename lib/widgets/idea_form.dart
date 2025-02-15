@@ -13,12 +13,13 @@ class _IdeaFormState extends State<IdeaForm> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _ideaController = TextEditingController();
   String feedback = '';
+  final DbService dbService = DbService(); // Add this line
 
   Future<void> submitIdea() async {
     if (_formKey.currentState!.validate()) {
       String idea = _ideaController.text;
       var validationResult = await ApiService.validateIdea(idea);
-      await DbService.saveIdea(idea, validationResult);
+      await dbService.saveIdea(idea, validationResult); // Change this line
       setState(() {
         feedback = 'Idea validated with score: ${validationResult['score']}';
       });
