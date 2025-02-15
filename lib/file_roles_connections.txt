@@ -1,0 +1,109 @@
+File-by-File Role and Connection
+1. main.dart
+Purpose:
+Entry point; initializes the app with MaterialApp.
+Sets the global theme and launches the DashboardScreen.
+Connections:
+Loads theme settings (from local DB or defaults).
+Navigates to other screens via Navigator.
+2. models.dart
+Purpose:
+Defines data classes such as:
+Idea: Contains user-submitted business idea details and validation scores.
+BusinessModel: Represents elements of the business canvas.
+Investor: Holds investor/mentor profile details.
+GamificationProgress: Tracks points, badges, and leaderboard info.
+Connections:
+Used by both api_service.dart (to parse API responses) and db_service.dart (for storing/retrieving data).
+3. services/api_service.dart
+Purpose:
+Contains methods to make HTTP calls (using Dio or http) to multiple external APIs:
+Idea Validation API: (e.g., GET https://api.startupideas.com/validate) to check the potential of a submitted idea.
+Investor Data API: (e.g., GET https://api.investordata.com/match) to fetch investor/mentor profiles.
+Business Model Template API: (e.g., GET https://api.businessmodel.com/template) if needed.
+Connections:
+Called by screens (e.g. Idea Submission and Investor Matching) to fetch fresh data.
+Returns JSON parsed into model objects.
+4. services/db_service.dart
+Purpose:
+Handles all local data storage using a local database (e.g., using the sqflite package).
+Provides functions to save, update, and retrieve:
+Idea details and feedback.
+Business model configurations.
+Investor profiles.
+Gamification progress.
+Connections:
+Called by screens after receiving API data.
+Provides local data for dashboard summaries and progress screens.
+5. screens/dashboard_screen.dart
+Purpose:
+Acts as the app’s home/hub.
+Displays summary cards (via summary_card.dart) for idea validation, business model status, investor match rating, and gamification stats.
+Offers navigation buttons to all other screens.
+Connections:
+Reads locally stored data (via db_service.dart).
+Navigates to Idea Submission, Business Canvas, Investor Matching, Gamification, and Settings screens.
+6. screens/idea_submission_screen.dart
+Purpose:
+Presents an input form (using idea_form.dart) for founders to submit business ideas.
+On submission, calls the Idea Validation API (via api_service.dart) and saves the feedback locally (via db_service.dart).
+Connections:
+Uses idea_form.dart for UI.
+Updates local database and refreshes UI feedback accordingly.
+7. screens/business_canvas_screen.dart
+Purpose:
+Offers an interactive drag‑and‑drop interface for building/editing a business model.
+Users manipulate “canvas items” (using canvas_item.dart) to design their roadmap.
+Saves user configurations locally.
+Connections:
+Uses draggable widgets.
+Saves changes via db_service.dart.
+8. screens/investor_matching_screen.dart
+Purpose:
+Displays a list of investor profiles in swipeable cards (using investor_card.dart).
+Provides a search bar (built into the screen) for filtering profiles.
+Fetches profiles from the Investor Data API and then stores/retrieves them locally.
+Connections:
+Calls api_service.dart and db_service.dart.
+Uses investor_card.dart for UI.
+9. screens/gamification_screen.dart
+Purpose:
+Shows a progress tracker with badges and a local leaderboard.
+Uses simple animations to display gamified elements.
+Connections:
+Retrieves progress data from db_service.dart.
+Displays data using custom widgets (badge/leaderboard).
+10. screens/settings_screen.dart
+Purpose:
+Provides a simple UI for toggling preferences such as dark/light mode and other settings.
+Uses preference_tile.dart for each settings option.
+Updates and saves preferences locally (using shared_preferences or db_service.dart).
+Connections:
+Reads/writes settings data.
+Changes theme across the app when updated.
+11. widgets/summary_card.dart
+Purpose:
+A reusable UI component that displays key metrics or summary data on the Dashboard.
+Connections:
+Used by dashboard_screen.dart to show summarized data from local DB.
+12. widgets/idea_form.dart
+Purpose:
+Implements the form for business idea input with basic validation.
+Connections:
+Embedded in idea_submission_screen.dart.
+On submission, triggers API call and local save.
+13. widgets/canvas_item.dart
+Purpose:
+Represents an individual item (e.g., “Value Proposition”) that can be dragged on the Business Canvas.
+Connections:
+Used by business_canvas_screen.dart.
+14. widgets/investor_card.dart
+Purpose:
+Displays an investor’s details in a card format, with swipe-to-dismiss functionality.
+Connections:
+Used by investor_matching_screen.dart to list profiles.
+15. widgets/preference_tile.dart
+Purpose:
+A simple list tile widget for each settings option (like theme toggle).
+Connections:
+Used by settings_screen.dart.

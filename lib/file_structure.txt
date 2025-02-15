@@ -1,0 +1,19 @@
+lib/
+├── main.dart
+├── models.dart
+├── services/
+│   ├── api_service.dart    // Calls external APIs
+│   └── db_service.dart     // Manages local database (using sqflite)
+├── screens/
+│   ├── dashboard_screen.dart         // Main hub with summary cards & navigation buttons
+│   ├── idea_submission_screen.dart   // Form to input and validate business ideas
+│   ├── business_canvas_screen.dart   // Interactive canvas for building business models
+│   ├── investor_matching_screen.dart // Displays investor/mentor profiles with search & swipe
+│   ├── gamification_screen.dart      // Shows progress tracker, badges, and leaderboard
+│   └── settings_screen.dart          // Allows user to toggle themes/preferences
+└── widgets/
+    ├── summary_card.dart       // Reusable card widget for dashboard summaries
+    ├── idea_form.dart          // Input form widget for idea submission
+    ├── canvas_item.dart        // Draggable item widget for business canvas
+    ├── investor_card.dart      // Card widget to display investor info
+    └── preference_tile.dart    // List tile widget for settings options
