@@ -12,6 +12,7 @@ import 'package:file_saver/file_saver.dart';
 import 'dart:typed_data' show Uint8List;
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class BusinessCanvasScreen extends StatefulWidget {
   const BusinessCanvasScreen({Key? key}) : super(key: key);
@@ -27,6 +28,8 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen>
   final TransformationController _transformationController =
       TransformationController();
   double _scale = 1.0;
+  final GlobalKey _canvasKey = GlobalKey();
+  Offset _lastPanOffset = Offset.zero;
 
   @override
   void initState() {
@@ -56,15 +59,20 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen>
     String canvasData = jsonEncode(items.map((item) => item.toMap()).toList());
 
     try {
-      // Get temporary directory
-      final directory = await getTemporaryDirectory();
-      final file = io.File('${directory.path}/business_canvas.json');
+      // Request storage permission
+      if (!await Permission.storage.isGranted) {
+        await Permission.storage.request();
+      }
 
-      // Write the data to the temporary file
+      // Use external storage
+      final directory = await getExternalStorageDirectory();
+      if (directory == null)
+        throw Exception('Unable to access external storage');
+
+      final file = io.File('${directory.path}/business_canvas.json');
       await file.writeAsString(canvasData);
 
-      // Share the file
-      await Share.shareXFiles([XFile(file.path)], text: 'Business Canvas Data');
+      await Share.shareFiles([file.path], text: 'Business Canvas Data');
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Canvas data ready to share!')),
@@ -101,6 +109,19 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen>
         items[index] = updatedItem;
       });
     }
+  }
+
+  void _handleTapDown(TapDownDetails details, BoxConstraints constraints) {
+    final RenderBox box =
+        _canvasKey.currentContext?.findRenderObject() as RenderBox;
+    final Offset localPosition = box.globalToLocal(details.globalPosition);
+    final Matrix4 transform = _transformationController.value.clone();
+    final double scale = transform.getMaxScaleOnAxis();
+
+    final newX = (localPosition.dx - transform.getTranslation().x) / scale;
+    final newY = (localPosition.dy - transform.getTranslation().y) / scale;
+
+    _lastPanOffset = Offset(newX, newY);
   }
 
   Widget _buildGridBackground() {
@@ -157,94 +178,121 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen>
           _buildGridBackground(),
           LayoutBuilder(
             builder: (context, constraints) {
-              return InteractiveViewer(
-                transformationController: _transformationController,
-                minScale: 0.5,
-                maxScale: 2.0,
-                constrained: false, // Allow content to be larger than viewport
-                child: SizedBox(
-                  // Make the canvas area larger than the screen
-                  width: constraints.maxWidth * 2,
-                  height: constraints.maxHeight * 2,
-                  child: Stack(
-                    children:
-                        items.map((item) {
-                          return AnimatedPositioned(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeInOut,
-                            left: item.x,
-                            top: item.y,
-                            child: Draggable<CanvasItemModel>(
-                              data: item,
-                              feedback: Material(child: CanvasItem(item: item)),
-                              childWhenDragging: Container(
-                                width: item.width,
-                                height: item.height,
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey),
-                                  borderRadius: BorderRadius.circular(8),
+              return GestureDetector(
+                onTapDown: (details) => _handleTapDown(details, constraints),
+                child: InteractiveViewer(
+                  key: _canvasKey,
+                  transformationController: _transformationController,
+                  minScale: 0.5,
+                  maxScale: 2.0,
+                  constrained:
+                      false, // Allow content to be larger than viewport
+                  boundaryMargin: EdgeInsets.all(double.infinity),
+                  child: SizedBox(
+                    // Make the canvas area larger than the screen
+                    width: constraints.maxWidth * 2,
+                    height: constraints.maxHeight * 2,
+                    child: Stack(
+                      children:
+                          items.map((item) {
+                            return Positioned(
+                              left: item.x,
+                              top: item.y,
+                              child: Draggable<CanvasItemModel>(
+                                data: item,
+                                feedback: Material(
+                                  child: CanvasItem(item: item),
+                                ),
+                                childWhenDragging: Container(
+                                  width: item.width,
+                                  height: item.height,
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.grey),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                onDragEnd: (details) {
+                                  final RenderBox box =
+                                      _canvasKey.currentContext
+                                              ?.findRenderObject()
+                                          as RenderBox;
+                                  final Offset localPosition = box
+                                      .globalToLocal(details.offset);
+                                  final Matrix4 transform =
+                                      _transformationController.value.clone();
+                                  final double scale =
+                                      transform.getMaxScaleOnAxis();
+
+                                  setState(() {
+                                    item.x =
+                                        (localPosition.dx -
+                                            transform.getTranslation().x) /
+                                        scale;
+                                    item.y =
+                                        (localPosition.dy -
+                                            transform.getTranslation().y) /
+                                        scale;
+                                    _updateCanvasItem(item);
+                                    _saveCanvasItem(item); // Save after drag
+                                  });
+                                },
+                                child: InkWell(
+                                  onTap: () async {
+                                    final updatedItem =
+                                        await showDialog<CanvasItemModel>(
+                                          context: context,
+                                          builder: (BuildContext context) {
+                                            return EditCanvasItemDialog(
+                                              item: item,
+                                            );
+                                          },
+                                        );
+                                    if (updatedItem != null) {
+                                      setState(() {
+                                        item.content = updatedItem.content;
+                                      });
+                                      _updateCanvasItem(item);
+                                      _saveCanvasItem(item); // Save after edit
+                                    }
+                                  },
+                                  onLongPress: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (BuildContext context) {
+                                        return AlertDialog(
+                                          title: const Text(
+                                            'Delete Canvas Item',
+                                          ),
+                                          content: const Text(
+                                            'Are you sure you want to delete this item?',
+                                          ),
+                                          actions: <Widget>[
+                                            TextButton(
+                                              onPressed:
+                                                  () =>
+                                                      Navigator.of(
+                                                        context,
+                                                      ).pop(),
+                                              child: const Text('Cancel'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () {
+                                                _deleteCanvasItem(item.id);
+                                                Navigator.of(context).pop();
+                                              },
+                                              child: const Text('Delete'),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                  },
+                                  child: CanvasItem(item: item),
                                 ),
                               ),
-                              onDragEnd: (details) {
-                                setState(() {
-                                  item.x = details.offset.dx;
-                                  item.y = details.offset.dy;
-                                  _updateCanvasItem(item);
-                                  _saveCanvasItem(item); // Save after drag
-                                });
-                              },
-                              child: InkWell(
-                                onTap: () async {
-                                  final updatedItem =
-                                      await showDialog<CanvasItemModel>(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return EditCanvasItemDialog(
-                                            item: item,
-                                          );
-                                        },
-                                      );
-                                  if (updatedItem != null) {
-                                    setState(() {
-                                      item.content = updatedItem.content;
-                                    });
-                                    _updateCanvasItem(item);
-                                    _saveCanvasItem(item); // Save after edit
-                                  }
-                                },
-                                onLongPress: () {
-                                  showDialog(
-                                    context: context,
-                                    builder: (BuildContext context) {
-                                      return AlertDialog(
-                                        title: const Text('Delete Canvas Item'),
-                                        content: const Text(
-                                          'Are you sure you want to delete this item?',
-                                        ),
-                                        actions: <Widget>[
-                                          TextButton(
-                                            onPressed:
-                                                () =>
-                                                    Navigator.of(context).pop(),
-                                            child: const Text('Cancel'),
-                                          ),
-                                          TextButton(
-                                            onPressed: () {
-                                              _deleteCanvasItem(item.id);
-                                              Navigator.of(context).pop();
-                                            },
-                                            child: const Text('Delete'),
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  );
-                                },
-                                child: CanvasItem(item: item),
-                              ),
-                            ),
-                          );
-                        }).toList(),
+                            );
+                          }).toList(),
+                    ),
                   ),
                 ),
               );
