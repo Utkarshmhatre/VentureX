@@ -10,6 +10,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
 import 'dart:typed_data' show Uint8List;
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 class BusinessCanvasScreen extends StatefulWidget {
   const BusinessCanvasScreen({Key? key}) : super(key: key);
@@ -53,39 +55,25 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen>
   Future<void> _saveCanvasItemsToDb(BuildContext context) async {
     String canvasData = jsonEncode(items.map((item) => item.toMap()).toList());
 
-    if (kIsWeb) {
-      try {
-        await FileSaver.instance.saveFile(
-          name: "business_canvas.json",
-          bytes: Uint8List.fromList(utf8.encode(canvasData)),
-          ext: 'json',
-          mimeType: MimeType.json,
-        );
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Canvas data downloaded!')),
-        );
-      } catch (e) {
-        print('Error downloading file on web: $e');
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Error saving file')));
-      }
-    } else {
-      String? outputFile = await FilePicker.platform.saveFile(
-        dialogTitle: 'Please select a location to save the canvas data:',
-        fileName: 'business_canvas.json',
-      );
+    try {
+      // Get temporary directory
+      final directory = await getTemporaryDirectory();
+      final file = io.File('${directory.path}/business_canvas.json');
 
-      if (outputFile != null) {
-        await io.File(outputFile).writeAsString(canvasData);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Canvas saved to file!')));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Save operation cancelled.')),
-        );
-      }
+      // Write the data to the temporary file
+      await file.writeAsString(canvasData);
+
+      // Share the file
+      await Share.shareXFiles([XFile(file.path)], text: 'Business Canvas Data');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Canvas data ready to share!')),
+      );
+    } catch (e) {
+      print('Error saving file: $e');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Error saving canvas data')));
     }
   }
 
@@ -167,87 +155,100 @@ class _BusinessCanvasScreenState extends State<BusinessCanvasScreen>
       body: Stack(
         children: [
           _buildGridBackground(),
-          InteractiveViewer(
-            transformationController: _transformationController,
-            minScale: 0.5,
-            maxScale: 2.0,
-            child: Stack(
-              children:
-                  items.map((item) {
-                    return AnimatedPositioned(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      left: item.x,
-                      top: item.y,
-                      child: Draggable<CanvasItemModel>(
-                        data: item,
-                        feedback: Material(child: CanvasItem(item: item)),
-                        childWhenDragging: Container(
-                          width: item.width,
-                          height: item.height,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onDragEnd: (details) {
-                          setState(() {
-                            item.x = details.offset.dx;
-                            item.y = details.offset.dy;
-                            _updateCanvasItem(item);
-                            _saveCanvasItem(item); // Save after drag
-                          });
-                        },
-                        child: InkWell(
-                          onTap: () async {
-                            final updatedItem =
-                                await showDialog<CanvasItemModel>(
-                                  context: context,
-                                  builder: (BuildContext context) {
-                                    return EditCanvasItemDialog(item: item);
-                                  },
-                                );
-                            if (updatedItem != null) {
-                              setState(() {
-                                item.content = updatedItem.content;
-                              });
-                              _updateCanvasItem(item);
-                              _saveCanvasItem(item); // Save after edit
-                            }
-                          },
-                          onLongPress: () {
-                            showDialog(
-                              context: context,
-                              builder: (BuildContext context) {
-                                return AlertDialog(
-                                  title: const Text('Delete Canvas Item'),
-                                  content: const Text(
-                                    'Are you sure you want to delete this item?',
-                                  ),
-                                  actions: <Widget>[
-                                    TextButton(
-                                      onPressed:
-                                          () => Navigator.of(context).pop(),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () {
-                                        _deleteCanvasItem(item.id);
-                                        Navigator.of(context).pop();
-                                      },
-                                      child: const Text('Delete'),
-                                    ),
-                                  ],
-                                );
+          LayoutBuilder(
+            builder: (context, constraints) {
+              return InteractiveViewer(
+                transformationController: _transformationController,
+                minScale: 0.5,
+                maxScale: 2.0,
+                constrained: false, // Allow content to be larger than viewport
+                child: SizedBox(
+                  // Make the canvas area larger than the screen
+                  width: constraints.maxWidth * 2,
+                  height: constraints.maxHeight * 2,
+                  child: Stack(
+                    children:
+                        items.map((item) {
+                          return AnimatedPositioned(
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                            left: item.x,
+                            top: item.y,
+                            child: Draggable<CanvasItemModel>(
+                              data: item,
+                              feedback: Material(child: CanvasItem(item: item)),
+                              childWhenDragging: Container(
+                                width: item.width,
+                                height: item.height,
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.grey),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              onDragEnd: (details) {
+                                setState(() {
+                                  item.x = details.offset.dx;
+                                  item.y = details.offset.dy;
+                                  _updateCanvasItem(item);
+                                  _saveCanvasItem(item); // Save after drag
+                                });
                               },
-                            );
-                          },
-                          child: CanvasItem(item: item),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-            ),
+                              child: InkWell(
+                                onTap: () async {
+                                  final updatedItem =
+                                      await showDialog<CanvasItemModel>(
+                                        context: context,
+                                        builder: (BuildContext context) {
+                                          return EditCanvasItemDialog(
+                                            item: item,
+                                          );
+                                        },
+                                      );
+                                  if (updatedItem != null) {
+                                    setState(() {
+                                      item.content = updatedItem.content;
+                                    });
+                                    _updateCanvasItem(item);
+                                    _saveCanvasItem(item); // Save after edit
+                                  }
+                                },
+                                onLongPress: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (BuildContext context) {
+                                      return AlertDialog(
+                                        title: const Text('Delete Canvas Item'),
+                                        content: const Text(
+                                          'Are you sure you want to delete this item?',
+                                        ),
+                                        actions: <Widget>[
+                                          TextButton(
+                                            onPressed:
+                                                () =>
+                                                    Navigator.of(context).pop(),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () {
+                                              _deleteCanvasItem(item.id);
+                                              Navigator.of(context).pop();
+                                            },
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                },
+                                child: CanvasItem(item: item),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                  ),
+                ),
+              );
+            },
           ),
           Positioned(
             bottom: 80,
